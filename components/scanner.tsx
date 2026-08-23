@@ -23,7 +23,9 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  // Отдельный input для камеры (capture="environment") и для галереи (без capture)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const galleryInputRef = useRef<HTMLInputElement>(null)
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -33,8 +35,8 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
   const startCamera = useCallback(async () => {
     setError(null)
     if (!navigator.mediaDevices?.getUserMedia) {
-      // нет доступа к live-камере — используем нативный выбор с камеры
-      fileInputRef.current?.click()
+      // нет доступа к live-камере — используем нативный ввод с камеры (capture)
+      cameraInputRef.current?.click()
       return
     }
     try {
@@ -52,8 +54,8 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
         }
       })
     } catch {
-      // разрешение не выдано — предлагаем загрузить файл
-      fileInputRef.current?.click()
+      // разрешение не выдано — открываем нативную камеру (capture)
+      cameraInputRef.current?.click()
     }
   }, [])
 
@@ -147,16 +149,29 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
   /* --------------------------- Рендер по стадии --------------------------- */
 
   const hiddenFileInput = (
-    <input
-      ref={fileInputRef}
-      type="file"
-      accept="image/*"
-      capture="environment"
-      className="sr-only"
-      onChange={onFileSelected}
-      aria-hidden
-      tabIndex={-1}
-    />
+    <>
+      {/* Камера: capture="environment" — на Android открывает камеру напрямую */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={onFileSelected}
+        aria-hidden
+        tabIndex={-1}
+      />
+      {/* Галерея: без capture — на Android открывает обычный выбор фото/файлов */}
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={onFileSelected}
+        aria-hidden
+        tabIndex={-1}
+      />
+    </>
   )
 
   if (stage === "camera") {
@@ -184,7 +199,7 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
 
         <div className="flex items-center justify-center gap-8 p-8 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => galleryInputRef.current?.click()}
             className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white transition active:scale-95"
             aria-label="Загрузить из галереи"
           >
@@ -279,7 +294,7 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
   // stage === "idle"
   return (
     <div className="flex flex-col gap-6 px-5 py-8">
-      <HeroPanel onCamera={startCamera} onUpload={() => fileInputRef.current?.click()} />
+      <HeroPanel onCamera={startCamera} onUpload={() => galleryInputRef.current?.click()} />
       {idleExtra}
       {hiddenFileInput}
     </div>
