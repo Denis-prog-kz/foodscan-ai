@@ -5,8 +5,12 @@ export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   try {
+    console.log("=== ANALYZE START ===")
+
     const body = await req.json()
     const image = body?.image
+
+    console.log("Image received:", typeof image, image?.length)
 
     if (!image || typeof image !== "string") {
       return NextResponse.json(
@@ -15,9 +19,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (image.length > 12_000_000) {
+    // Не допускаем слишком большой запрос
+    if (image.length > 4_000_000) {
       return NextResponse.json(
-        { error: "Изображение слишком большое" },
+        {
+          error:
+            "Изображение слишком большое. Попробуйте фото меньшего размера.",
+        },
         { status: 413 }
       )
     }
@@ -25,17 +33,21 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.GEMINI_API_KEY
 
     if (!apiKey) {
-      console.error("GEMINI_API_KEY is not configured")
+      console.error("GEMINI_API_KEY is missing")
 
       return NextResponse.json(
-        { error: "API-ключ Gemini не настроен на сервере" },
+        { error: "GEMINI_API_KEY не настроен на сервере" },
         { status: 500 }
       )
     }
 
-    const match = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
+    const match = image.match(
+      /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/
+    )
 
     if (!match) {
+      console.error("Invalid image format")
+
       return NextResponse.json(
         { error: "Неверный формат изображения" },
         { status: 400 }
@@ -45,28 +57,33 @@ export async function POST(req: NextRequest) {
     const mimeType = match[1]
     const base64Data = match[2]
 
+    console.log("MIME:", mimeType)
+    console.log("Base64 length:", base64Data.length)
+
     const prompt = `
 Ты — AI-анализатор еды для приложения FoodScan AI.
 
 Проанализируй фотографию еды.
 
 Определи:
+
 1. Название блюда или продукта.
-2. Примерный вес порции в граммах, если вес можно определить по фотографии.
+2. Примерный вес порции в граммах.
 3. Примерную калорийность.
 4. Белки в граммах.
 5. Жиры в граммах.
 6. Углеводы в граммах.
 7. Уверенность распознавания от 0 до 100.
 
-ВАЖНО:
+Правила:
+
 - Не придумывай конкретные ингредиенты, если их невозможно определить.
 - Если на фотографии видны весы, используй показание весов.
 - Учитывай размер порции.
 - Если точный вес неизвестен, сделай разумную оценку.
-- Ответ должен быть только JSON без markdown.
+- Ответ должен быть только JSON.
 
-Формат ответа:
+Формат:
 
 {
   "name": "Название блюда",
@@ -79,8 +96,10 @@ export async function POST(req: NextRequest) {
 }
 `
 
+    console.log("Sending request to Gemini...")
+
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
       {
         method: "POST",
         headers: {
@@ -94,8 +113,8 @@ export async function POST(req: NextRequest) {
                   text: prompt,
                 },
                 {
-                  inline_data: {
-                    mime_type: mimeType,
+                  inlineData: {
+                    mimeType,
                     data: base64Data,
                   },
                 },
@@ -110,48 +129,81 @@ export async function POST(req: NextRequest) {
       }
     )
 
-    if (!response.ok) {
-      const errorText = await response.text()
+    console.log("Gemini status:", response.status)
 
-      console.error("Gemini API error:", errorText)
+    const responseText = await response.text()
+
+    if (!response.ok) {
+      console.error("Gemini ERROR:", responseText)
 
       return NextResponse.json(
-        { error: "Ошибка Gemini API", details: errorText },
+        {
+          error: `Gemini API error ${response.status}`,
+          details: responseText,
+        },
         { status: 500 }
       )
     }
 
-    const data = await response.json()
+    console.log("Gemini response received")
+
+    let data: any
+
+    try {
+      data = JSON.parse(responseText)
+    } catch {
+      console.error("Gemini returned invalid HTTP JSON:", responseText)
+
+      return NextResponse.json(
+        { error: "Gemini вернул некорректный ответ" },
+        { status: 500 }
+      )
+    }
 
     const text =
       data?.candidates?.[0]?.content?.parts?.[0]?.text
 
     if (!text) {
+      console.error("No text in Gemini response:", data)
+
       return NextResponse.json(
         { error: "Gemini не вернул результат" },
         { status: 500 }
       )
     }
 
-    let result
+    console.log("Gemini text:", text)
+
+    let result: any
 
     try {
       result = JSON.parse(text)
     } catch {
-      console.error("Invalid Gemini JSON:", text)
+      console.error("Invalid Gemini result JSON:", text)
 
       return NextResponse.json(
-        { error: "Gemini вернул некорректный результат" },
+        { error: "Gemini вернул некорректный JSON" },
         { status: 500 }
       )
     }
 
-    return NextResponse.json(result)
+    console.log("=== ANALYZE SUCCESS ===")
+
+    return NextResponse.json({
+      analysis: result,
+      source: "gemini",
+    })
   } catch (error) {
-    console.error("Analyze error:", error)
+    console.error("=== ANALYZE EXCEPTION ===")
+    console.error(error)
 
     return NextResponse.json(
-      { error: "Не удалось проанализировать изображение" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Не удалось проанализировать изображение",
+      },
       { status: 500 }
     )
   }
