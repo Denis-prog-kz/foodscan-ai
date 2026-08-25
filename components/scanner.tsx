@@ -31,8 +31,7 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
 
-  // Диагностика
-  const [debug, setDebug] = useState<string>("Готово")
+  const [debug, setDebug] = useState("Готово")
   const [debugSize, setDebugSize] = useState<number | null>(null)
 
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -42,7 +41,7 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
   const galleryInputRef = useRef<HTMLInputElement>(null)
 
   const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
   }, [])
 
@@ -78,8 +77,7 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
         }
       })
     } catch (err) {
-      console.error(err)
-
+      console.error("Camera error:", err)
       setDebug("Нет доступа к live-камере → открываем камеру телефона")
       cameraInputRef.current?.click()
     }
@@ -114,7 +112,6 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
 
       const controller = new AbortController()
 
-      // Таймаут 45 секунд
       const timeout = setTimeout(() => {
         controller.abort()
       }, 45_000)
@@ -140,7 +137,7 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
 
       const responseText = await res.text()
 
-      console.log("🔥 API RESPONSE STATUS:", res.status)
+      console.log("🔥 API STATUS:", res.status)
       console.log("🔥 API RESPONSE:", responseText)
 
       let data: any = null
@@ -149,17 +146,34 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
         data = JSON.parse(responseText)
       } catch {
         throw new Error(
-          `Сервер вернул не JSON. HTTP ${res.status}. Ответ: ${responseText.slice(
+          `Сервер вернул не JSON.\n\nHTTP ${res.status}\n\nОтвет:\n${responseText.slice(
             0,
-            300
+            1000
           )}`
         )
       }
 
+      /*
+       * ВАЖНО:
+       * Здесь выводим details от Gemini прямо на экран.
+       */
       if (!res.ok) {
+        console.log("🔥 GEMINI ERROR:", data?.error)
+        console.log("🔥 GEMINI DETAILS:", data?.details)
+
+        const errorMessage = data?.error || `Ошибка HTTP ${res.status}`
+
+        const details =
+          typeof data?.details === "string"
+            ? data.details
+            : data?.details
+              ? JSON.stringify(data.details, null, 2)
+              : ""
+
         throw new Error(
-          data?.error ||
-            `Ошибка сервера HTTP ${res.status}`
+          details
+            ? `${errorMessage}\n\nДетали:\n${details}`
+            : errorMessage
         )
       }
 
@@ -167,7 +181,11 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
         console.log("🔥 НЕОЖИДАННЫЙ ФОРМАТ:", data)
 
         throw new Error(
-          "Сервер ответил, но в ответе отсутствует поле analysis"
+          `Сервер ответил, но отсутствует поле "analysis".\n\nОтвет сервера:\n${JSON.stringify(
+            data,
+            null,
+            2
+          )}`
         )
       }
 
@@ -253,7 +271,6 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
     )
 
     stopCamera()
-
     analyze(dataUrl)
   }, [analyze, stopCamera])
 
@@ -355,21 +372,18 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
     </>
   )
 
-  /*
-   * ДИАГНОСТИЧНАЯ ПАНЕЛЬ
-   */
   const DebugPanel = () => (
-    <div className="mx-5 mt-4 rounded-xl border border-yellow-400/40 bg-yellow-50 p-3 text-left text-xs text-black dark:bg-yellow-950 dark:text-white">
+    <div className="mx-5 mt-4 rounded-xl border border-yellow-400/50 bg-yellow-50 p-3 text-left text-xs text-black dark:bg-yellow-950 dark:text-white">
       <div className="font-bold">
         🔧 Диагностика
       </div>
 
-      <div className="mt-1 break-words">
+      <div className="mt-2 whitespace-pre-wrap break-words">
         {debug}
       </div>
 
       {debugSize !== null && (
-        <div className="mt-1">
+        <div className="mt-2">
           Размер изображения:{" "}
           {Math.round(debugSize / 1024)} KB
         </div>
@@ -535,18 +549,22 @@ export function Scanner({ idleExtra }: { idleExtra?: React.ReactNode }) {
     return (
       <div className="flex flex-col items-center gap-5 px-5 py-16 text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
-          <AlertCircle className="h-8 w-8 text-destructive"
+          <AlertCircle
+            className="h-8 w-8 text-destructive"
+            aria-hidden
           />
         </div>
 
-        <div>
+        <div className="w-full">
           <h2 className="text-lg font-semibold">
             Что-то пошло не так
           </h2>
 
-          <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-            {error}
-          </p>
+          <div className="mt-2 max-h-80 overflow-auto rounded-xl bg-muted p-3 text-left">
+            <p className="whitespace-pre-wrap break-words text-xs">
+              {error}
+            </p>
+          </div>
         </div>
 
         <DebugPanel />
@@ -587,7 +605,10 @@ function HeroPanel({
     <>
       <div className="flex flex-col items-center gap-5 rounded-3xl bg-primary px-6 py-10 text-center text-primary-foreground">
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-foreground/15">
-          <ScanLine className="h-8 w-8" aria-hidden />
+          <ScanLine
+            className="h-8 w-8"
+            aria-hidden
+          />
         </div>
 
         <div>
