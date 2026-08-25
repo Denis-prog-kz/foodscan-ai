@@ -10,8 +10,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const image = body?.image
 
-    console.log("Image received:", typeof image, image?.length)
-
     if (!image || typeof image !== "string") {
       return NextResponse.json(
         { error: "Изображение не передано" },
@@ -19,16 +17,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Не допускаем слишком большой запрос
-    if (image.length > 4_000_000) {
-      return NextResponse.json(
-        {
-          error:
-            "Изображение слишком большое. Попробуйте фото меньшего размера.",
-        },
-        { status: 413 }
-      )
-    }
+    console.log("Image size:", image.length)
 
     const apiKey = process.env.GEMINI_API_KEY
 
@@ -46,8 +35,6 @@ export async function POST(req: NextRequest) {
     )
 
     if (!match) {
-      console.error("Invalid image format")
-
       return NextResponse.json(
         { error: "Неверный формат изображения" },
         { status: 400 }
@@ -57,16 +44,12 @@ export async function POST(req: NextRequest) {
     const mimeType = match[1]
     const base64Data = match[2]
 
-    console.log("MIME:", mimeType)
-    console.log("Base64 length:", base64Data.length)
-
     const prompt = `
 Ты — AI-анализатор еды для приложения FoodScan AI.
 
 Проанализируй фотографию еды.
 
 Определи:
-
 1. Название блюда или продукта.
 2. Примерный вес порции в граммах.
 3. Примерную калорийность.
@@ -76,12 +59,11 @@ export async function POST(req: NextRequest) {
 7. Уверенность распознавания от 0 до 100.
 
 Правила:
-
 - Не придумывай конкретные ингредиенты, если их невозможно определить.
 - Если на фотографии видны весы, используй показание весов.
 - Учитывай размер порции.
 - Если точный вес неизвестен, сделай разумную оценку.
-- Ответ должен быть только JSON.
+- Ответ только JSON.
 
 Формат:
 
@@ -99,11 +81,12 @@ export async function POST(req: NextRequest) {
     console.log("Sending request to Gemini...")
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
         },
         body: JSON.stringify({
           contents: [
@@ -114,7 +97,7 @@ export async function POST(req: NextRequest) {
                 },
                 {
                   inlineData: {
-                    mimeType,
+                    mimeType: mimeType,
                     data: base64Data,
                   },
                 },
@@ -134,7 +117,7 @@ export async function POST(req: NextRequest) {
     const responseText = await response.text()
 
     if (!response.ok) {
-      console.error("Gemini ERROR:", responseText)
+      console.error("Gemini API error:", responseText)
 
       return NextResponse.json(
         {
@@ -145,14 +128,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    console.log("Gemini response received")
-
     let data: any
 
     try {
       data = JSON.parse(responseText)
     } catch {
-      console.error("Gemini returned invalid HTTP JSON:", responseText)
+      console.error("Invalid Gemini HTTP response:", responseText)
 
       return NextResponse.json(
         { error: "Gemini вернул некорректный ответ" },
@@ -164,7 +145,7 @@ export async function POST(req: NextRequest) {
       data?.candidates?.[0]?.content?.parts?.[0]?.text
 
     if (!text) {
-      console.error("No text in Gemini response:", data)
+      console.error("No text from Gemini:", data)
 
       return NextResponse.json(
         { error: "Gemini не вернул результат" },
@@ -172,14 +153,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    console.log("Gemini text:", text)
-
     let result: any
 
     try {
       result = JSON.parse(text)
     } catch {
-      console.error("Invalid Gemini result JSON:", text)
+      console.error("Invalid Gemini JSON:", text)
 
       return NextResponse.json(
         { error: "Gemini вернул некорректный JSON" },
@@ -194,8 +173,7 @@ export async function POST(req: NextRequest) {
       source: "gemini",
     })
   } catch (error) {
-    console.error("=== ANALYZE EXCEPTION ===")
-    console.error(error)
+    console.error("Analyze exception:", error)
 
     return NextResponse.json(
       {
